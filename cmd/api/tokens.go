@@ -5,7 +5,10 @@ import (
 	"greenlight-api/internal/data"
 	"greenlight-api/internal/validator"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/pascaldekloe/jwt"
 )
 
 func (app *application) createAuthenticationTokenHandler(w http.ResponseWriter, r *http.Request) {
@@ -42,21 +45,45 @@ func (app *application) createAuthenticationTokenHandler(w http.ResponseWriter, 
 	}
 
 	match, err := user.Password.Matches(input.Password)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
 	if !match {
-		app.serverErrorResponse(w, r, err)
+		app.invalidCredentialsResponse(w, r)
 		return
 	}
 
-	token, err := app.models.Tokens.New(user.ID, 24*time.Hour, data.ScopeActivation)
+	var claims jwt.Claims
+	claims.Subject = strconv.FormatInt(user.ID, 10)
+	claims.Issued = jwt.NewNumericTime(time.Now())
+	claims.NotBefore = jwt.NewNumericTime(time.Now())
+	claims.Expires = jwt.NewNumericTime(time.Now().Add(24 * time.Hour))
+	claims.Issuer = "greenlight-api"
+	claims.Audiences = []string{"greenlight-api"}
+
+	jwtBytes, err := claims.HMACSign(jwt.HS256, []byte(app.config.jwt.secret))
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 
-	err = app.writeJSON(w, http.StatusCreated, envelope{"authentication_token": token}, nil)
+	err = app.writeJSON(w, http.StatusCreated, envelope{"authentication_token": string(jwtBytes)}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 	}
+
+	// token, err := app.models.Tokens.New(user.ID, 24*time.Hour, data.ScopeActivation)
+	// if err != nil {
+	// 	app.serverErrorResponse(w, r, err)
+	// 	return
+	// }
+
+	// err = app.writeJSON(w, http.StatusCreated, envelope{"authentication_token": token}, nil)
+	// if err != nil {
+	// 	app.serverErrorResponse(w, r, err)
+	// }
 
 }
 
